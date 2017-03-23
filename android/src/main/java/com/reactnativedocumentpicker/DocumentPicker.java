@@ -112,8 +112,8 @@ public class DocumentPicker extends ReactContextBaseJavaModule implements Activi
         } else {
             map = metaDataFromContentResolver(uri);
         }
-
-        map.putString("uri", uri.toString());
+        ContentResolver contentResolver = getReactApplicationContext().getContentResolver();
+        map.putString("uri", "file://" + RealPathUtil.getRealPathFromURI(contentResolver, uri));
 
         return map;
     }
