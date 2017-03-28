@@ -21,6 +21,7 @@ import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableMap;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.URL;
@@ -105,7 +106,7 @@ public class DocumentPicker extends ReactContextBaseJavaModule implements Activi
 
     private WritableMap toMapWithMetadata(Uri uri) {
         WritableMap map;
-        if(uri.toString().startsWith("/")) {
+        if (uri.toString().startsWith("/")) {
             map = metaDataFromFile(new File(uri.toString()));
         } else if (uri.toString().startsWith("http")) {
             map = metaDataFromUri(uri);
@@ -113,7 +114,10 @@ public class DocumentPicker extends ReactContextBaseJavaModule implements Activi
             map = metaDataFromContentResolver(uri);
         }
         ContentResolver contentResolver = getReactApplicationContext().getContentResolver();
-        map.putString("uri", "file://" + RealPathUtil.getRealPathFromURI(contentResolver, uri));
+
+        if (!map.hasKey("uri")) {
+            map.putString("uri", "file://" + RealPathUtil.getRealPathFromURI(contentResolver, uri));
+        }
 
         return map;
     }
@@ -138,7 +142,7 @@ public class DocumentPicker extends ReactContextBaseJavaModule implements Activi
     private WritableMap metaDataFromFile(File file) {
         WritableMap map = Arguments.createMap();
 
-        if(!file.exists())
+        if (!file.exists())
             return map;
 
         map.putInt(Fields.FILE_SIZE, (int) file.length());
@@ -159,14 +163,23 @@ public class DocumentPicker extends ReactContextBaseJavaModule implements Activi
 
         try {
             if (cursor != null && cursor.moveToFirst()) {
-
-                map.putString(Fields.FILE_NAME, cursor.getString(cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)));
+                String fileName = cursor.getString(cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME));
+                map.putString(Fields.FILE_NAME, fileName);
 
                 int sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE);
                 if (!cursor.isNull(sizeIndex)) {
                     String size = cursor.getString(sizeIndex);
+                    Integer fileSize = Integer.valueOf(size);
                     if (size != null)
-                        map.putInt(Fields.FILE_SIZE, Integer.valueOf(size));
+                        map.putInt(Fields.FILE_SIZE, fileSize);
+
+
+                    try {
+                        File file = downloadTemp(uri, fileName, fileSize);
+                        map.putString("uri", Uri.fromFile(file).toString());
+                    } catch (IOException e) {
+                        Log.e("DocumentPicker", "Failed to download file", e);
+                    }
                 }
             }
         } finally {
@@ -178,13 +191,39 @@ public class DocumentPicker extends ReactContextBaseJavaModule implements Activi
         return map;
     }
 
+    private File downloadTemp(Uri uri, String fileName, Integer fileSize) throws IOException {
+        File outputDir = getReactApplicationContext().getCacheDir();
+        File file = new File(outputDir, fileName);
+        file.deleteOnExit();
+
+        ContentResolver contentResolver = getReactApplicationContext().getContentResolver();
+
+        ReadableByteChannel channel = Channels.newChannel(contentResolver.openInputStream(uri));
+        try {
+            FileOutputStream stream = new FileOutputStream(file);
+
+            try {
+                stream.getChannel().transferFrom(channel, 0, fileSize);
+
+                return file;
+            } catch (Exception e) {
+                e.printStackTrace();
+            } finally {
+                stream.close();
+            }
+        } finally {
+            channel.close();
+        }
+        return file;
+    }
+
     private static File download(Uri uri, File outputDir) throws IOException {
         File file = File.createTempFile("prefix", "extension", outputDir);
 
         URL url = new URL(uri.toString());
 
         ReadableByteChannel channel = Channels.newChannel(url.openStream());
-        try{
+        try {
             FileOutputStream stream = new FileOutputStream(file);
 
             try {
